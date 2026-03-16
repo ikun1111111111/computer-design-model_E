@@ -23,6 +23,7 @@ frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
 frontend/pnpm-debug.log*
+frontend/npm_cache/
 
 # Backend (Python/FastAPI)
 backend/__pycache__/
