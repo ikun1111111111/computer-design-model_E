@@ -1,12 +1,65 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Button from '../components/Button';
+import AbilityRadarChart from '../components/AbilityRadarChart';
 import SuEmbroidery from '../assets/Suzhou-embroidery.png';
 import PurpleClay from '../assets/Purple-Clay.png';
+import { getUserProfile, getUserStats, getLocalRecords } from '../utils/practiceTracker';
 
 const MyPractice = () => {
   const navigate = useNavigate();
+  const [stats, setStats] = useState({
+    total_practice_hours: 0,
+    average_accuracy: 0,
+    mastered_crafts: 0,
+    total_works: 0
+  });
+  const [abilities, setAbilities] = useState({
+    stability: 0,
+    accuracy: 0,
+    speed: 0,
+    creativity: 0,
+    knowledge: 0
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // 获取用户统计数据
+    const fetchStats = async () => {
+      try {
+        // 尝试从 API 获取数据
+        const profileData = await getUserProfile();
+        console.log('MyPractice: profileData', profileData);
+        if (profileData && profileData.stats) {
+          setStats({
+            total_practice_hours: parseFloat(profileData.stats.total_practice_hours) || 0,
+            average_accuracy: parseFloat(profileData.stats.average_accuracy) || 0,
+            mastered_crafts: parseInt(profileData.stats.mastered_crafts) || 0,
+            total_works: parseInt(profileData.stats.total_works) || 0
+          });
+          if (profileData.abilities) {
+            setAbilities(profileData.abilities);
+          }
+        } else {
+          // API 返回空数据，使用本地存储
+          const localStats = await getUserStats();
+          console.log('MyPractice: localStats', localStats);
+          setStats(localStats);
+        }
+      } catch (error) {
+        console.log('API 不可用，使用本地存储数据');
+        // API 失败，使用本地存储
+        const localStats = await getUserStats();
+        console.log('MyPractice: localStats from catch', localStats);
+        setStats(localStats);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, []);
 
   return (
     <div className="min-h-screen bg-rice-paper">
@@ -31,31 +84,72 @@ const MyPractice = () => {
           <div className="bg-white p-6 rounded-sm card-shadow text-center relative overflow-hidden group">
             <div className="absolute inset-0 bg-ink-black/5 transform translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
             <div className="relative z-10">
-              <div className="text-4xl font-serif mb-2">12.5h</div>
+              <div className="text-4xl font-serif mb-2">
+                {loading ? '-' :
+                  stats.total_practice_hours >= 1
+                    ? `${stats.total_practice_hours.toFixed(1)}h`
+                    : `${Math.max(1, Math.round(stats.total_practice_hours * 60))}min`
+                }
+              </div>
               <div className="text-xs text-charcoal/60 uppercase tracking-widest">总修习时长</div>
             </div>
           </div>
           <div className="bg-white p-6 rounded-sm card-shadow text-center relative overflow-hidden group">
             <div className="absolute inset-0 bg-vermilion/5 transform translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
             <div className="relative z-10">
-              <div className="text-4xl font-serif mb-2 text-vermilion">85%</div>
+              <div className="text-4xl font-serif mb-2 text-vermilion">{loading ? '-' : `${stats.average_accuracy}%`}</div>
               <div className="text-xs text-charcoal/60 uppercase tracking-widest">平均准确率</div>
             </div>
           </div>
           <div className="bg-white p-6 rounded-sm card-shadow text-center relative overflow-hidden group">
             <div className="absolute inset-0 bg-cyan-glaze/5 transform translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
             <div className="relative z-10">
-              <div className="text-4xl font-serif mb-2 text-cyan-glaze">3</div>
+              <div className="text-4xl font-serif mb-2 text-cyan-glaze">{loading ? '-' : stats.mastered_crafts}</div>
               <div className="text-xs text-charcoal/60 uppercase tracking-widest">掌握技法</div>
             </div>
           </div>
           <div className="bg-white p-6 rounded-sm card-shadow text-center relative overflow-hidden group">
             <div className="absolute inset-0 bg-tea-green/20 transform translate-y-full group-hover:translate-y-0 transition-transform duration-500"></div>
             <div className="relative z-10">
-              <div className="text-4xl font-serif mb-2 text-ink-black/80">15</div>
+              <div className="text-4xl font-serif mb-2 text-ink-black/80">{loading ? '-' : stats.total_works}</div>
               <div className="text-xs text-charcoal/60 uppercase tracking-widest">完成作品</div>
             </div>
           </div>
+        </div>
+
+        {/* Ability Radar Chart */}
+        <div className="mb-16 bg-white p-8 rounded-sm card-shadow">
+          <h2 className="font-xiaowei text-2xl text-ink-black mb-6 text-center">能力五维</h2>
+          <div className="flex justify-center">
+            {loading ? (
+              <div className="h-96 flex items-center justify-center text-charcoal/60">
+                加载能力数据中...
+              </div>
+            ) : (
+              <AbilityRadarChart
+                abilities={abilities}
+                width={450}
+                height={450}
+              />
+            )}
+          </div>
+          {/* 能力值详情 */}
+          {!loading && (
+            <div className="grid grid-cols-5 gap-4 mt-8 pt-6 border-t border-ink-black/10">
+              {Object.entries(abilities).map(([key, value]) => (
+                <div key={key} className="text-center">
+                  <div className="text-3xl font-serif text-vermilion mb-1">{value}</div>
+                  <div className="text-xs text-charcoal/60 uppercase">
+                    {key === 'stability' && '稳定性'}
+                    {key === 'accuracy' && '准确度'}
+                    {key === 'speed' && '速度'}
+                    {key === 'creativity' && '创意'}
+                    {key === 'knowledge' && '知识'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Recent Projects */}
@@ -123,13 +217,25 @@ const MyPractice = () => {
         {/* Certificates */}
         <h2 className="font-xiaowei text-3xl mb-8 border-l-4 border-tea-green pl-4">我的证书</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="border-4 border-double border-ink-black/10 p-8 bg-rice-paper text-center relative overflow-hidden group cursor-pointer hover:border-vermilion/30 transition-colors">
+          <div className="border-4 border-double border-ink-black/10 p-8 bg-rice-paper text-center relative overflow-hidden group cursor-pointer hover:border-vermilion/30 transition-colors" onClick={() => navigate('/certificate-preview')}>
             <div className="absolute top-0 right-0 w-16 h-16 bg-vermilion/10 rounded-bl-full"></div>
             <div className="font-calligraphy text-4xl mb-4 text-ink-black">结业证书</div>
             <p className="text-sm text-charcoal/60 mb-6 font-serif">兹证明 李明 完成<br />苏绣初级课程修习</p>
             <div className="text-xs text-charcoal/40 font-sans tracking-widest">2026.02.15</div>
             <div className="mt-4 opacity-0 group-hover:opacity-100 transition-opacity text-vermilion text-sm font-bold">点击下载</div>
           </div>
+          {/* 占位符 - 未来证书 */}
+          <div className="border-2 border-dashed border-ink-black/10 p-8 bg-white text-center relative overflow-hidden flex flex-col items-center justify-center min-h-[200px]">
+            <div className="text-charcoal/30 font-calligraphy text-2xl mb-2">更多证书</div>
+            <p className="text-xs text-charcoal/40 font-serif">完成更多课程后解锁</p>
+          </div>
+        </div>
+
+        {/* 前往证书页面 */}
+        <div className="mt-8 text-center">
+          <Button variant="outline" onClick={() => navigate('/certificate-preview')}>
+            查看证书预览与下载
+          </Button>
         </div>
 
       </main>

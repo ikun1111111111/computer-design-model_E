@@ -67,6 +67,10 @@ def init_database():
     print("\n数据表:")
     print("  - conversations: 对话历史表")
     print("  - follow_up_questions: 追问选项表")
+    print("  - users: 用户档案表")
+    print("  - practice_records: 练习记录表")
+    print("  - user_works: 用户作品表")
+    print("  - user_abilities: 用户能力表")
 
 
 if __name__ == "__main__":

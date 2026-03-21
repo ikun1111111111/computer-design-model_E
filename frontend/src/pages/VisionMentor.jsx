@@ -1,10 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import HandTracking from '../components/HandTracking';
+import { tracker, savePracticeRecord } from '../utils/practiceTracker';
+import Button from '../components/Button';
 
 const VisionMentor = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const scenarioParam = searchParams.get('scenario');
   const [activeScenario, setActiveScenario] = useState(scenarioParam || 'embroidery'); // 'embroidery' | 'clay'
 
@@ -13,6 +16,19 @@ const VisionMentor = () => {
       setActiveScenario(scenarioParam);
     }
   }, [scenarioParam]);
+
+  // Practice tracking state
+  const [isPracticing, setIsPracticing] = useState(false);
+  const [practiceDuration, setPracticeDuration] = useState(0);
+  const [accuracySamples, setAccuracySamples] = useState([]);
+  const [showSessionSummary, setShowSessionSummary] = useState(false);
+  const [sessionStats, setSessionStats] = useState(null);
+  const [displayTime, setDisplayTime] = useState('0:00'); // 用于显示的格式化时间
+  const durationTimerRef = useRef(null);
+  const durationRef = useRef(0); // 用 ref 保存最新时长，避免闭包问题
+  const isPracticingRef = useRef(false); // 用 ref 保存练习状态
+  const userId = 1; // Default user ID
+
   const [metricValue, setMetricValue] = useState(0);
   const [feedbackStatus, setFeedbackStatus] = useState('waiting'); // 'waiting' | 'good' | 'warning' | 'error'
   const [feedbackMessage, setFeedbackMessage] = useState('等待检测...');
@@ -45,7 +61,76 @@ const VisionMentor = () => {
 
   const currentTheme = theme[activeScenario];
 
-  const handleHandResults = (results) => {
+  /**
+   * 开始练习
+   */
+  const startPractice = () => {
+    tracker.reset();
+    tracker.start(
+      activeScenario,
+      activeScenario === 'embroidery' ? 'suzhou_embroidery' : 'purple_clay',
+      activeScenario === 'embroidery' ? '苏绣·平针基础' : '紫砂·拍泥片'
+    );
+    setIsPracticing(true);
+    isPracticingRef.current = true; // 同步更新 ref
+    setPracticeDuration(0);
+    setDisplayTime('0:00');
+    setAccuracySamples([]);
+    durationRef.current = 0;
+
+    // 清除之前的定时器
+    if (durationTimerRef.current) {
+      clearInterval(durationTimerRef.current);
+    }
+
+    // 重新开始计时器 - 直接更新显示时间
+    durationTimerRef.current = setInterval(() => {
+      const newValue = durationRef.current + 1;
+      durationRef.current = newValue;
+      const minutes = Math.floor(newValue / 60);
+      const seconds = String(newValue % 60).padStart(2, '0');
+      const newTime = `${minutes}:${seconds}`;
+      setDisplayTime(newTime);
+      console.log('[Timer] 时长:', newTime);
+    }, 1000);
+
+    console.log('[Timer] 开始练习，计时器启动');
+  };
+
+  /**
+   * 结束练习
+   */
+  const endPractice = async () => {
+    if (durationTimerRef.current) {
+      clearInterval(durationTimerRef.current);
+      durationTimerRef.current = null;
+    }
+    setIsPracticing(false);
+    isPracticingRef.current = false; // 同步更新 ref
+
+    const stats = tracker.end();
+    if (stats) {
+      // 使用 tracker 计算的时长（基于 startTime 和 endTime 的差值）
+      const result = await savePracticeRecord(userId, {
+        ...stats,
+        feedback: feedbackMessage
+      });
+
+      if (result.success) {
+        setSessionStats({
+          duration: stats.duration,
+          accuracy: stats.accuracy.toFixed(1),
+          score: stats.score.toFixed(1)
+        });
+        setShowSessionSummary(true);
+      }
+    }
+  };
+
+  /**
+   * 处理手部检测结果
+   */
+  const handleHandResults = useCallback((results) => {
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
       const landmarks = results.multiHandLandmarks[0];
       const thumbTip = landmarks[4];
@@ -55,15 +140,38 @@ const VisionMentor = () => {
       const distance = Math.sqrt(
         Math.pow(thumbTip.x - indexTip.x, 2) + Math.pow(thumbTip.y - indexTip.y, 2)
       );
-      
+
       setMetricValue(distance);
 
-      // Feedback logic
-      // Customize thresholds based on scenario if needed
-      const thresholds = activeScenario === 'embroidery' 
-        ? { min: 0.03, max: 0.15 } 
+      // 计算当前准确率 (基于距离是否在目标范围内)
+      const thresholds = activeScenario === 'embroidery'
+        ? { min: 0.03, max: 0.15 }
         : { min: 0.05, max: 0.2 };
 
+      let currentAccuracy = 0;
+      if (distance < thresholds.min || distance > thresholds.max) {
+        // 超出范围，准确率降低
+        const distToMin = Math.abs(distance - thresholds.min);
+        const distToMax = Math.abs(distance - thresholds.max);
+        const distToRange = Math.min(distToMin, distToMax);
+        currentAccuracy = Math.max(0, 100 - distToRange * 500);
+      } else {
+        // 在范围内，计算完美度
+        const center = (thresholds.min + thresholds.max) / 2;
+        const distFromCenter = Math.abs(distance - center);
+        const maxDist = (thresholds.max - thresholds.min) / 2;
+        currentAccuracy = 100 - (distFromCenter / maxDist) * 20; // 80-100 分
+      }
+
+      // 记录准确率采样（使用函数式更新获取最新状态）
+      setAccuracySamples(prev => [...prev, currentAccuracy]);
+
+      // 同步更新 tracker（使用 ref 检查状态，避免闭包问题）
+      if (isPracticingRef.current) {
+        tracker.recordAccuracy(currentAccuracy);
+      }
+
+      // Feedback logic
       if (distance < thresholds.min) {
         setFeedbackStatus('error');
         setFeedbackMessage(activeScenario === 'embroidery' ? '捏针过紧 (易断线)' : '拍打过重 (泥片易裂)');
@@ -79,7 +187,17 @@ const VisionMentor = () => {
       setFeedbackStatus('waiting');
       setFeedbackMessage('未检测到手部动作');
     }
-  };
+  }, [activeScenario]);
+
+  // 清理定时器
+  useEffect(() => {
+    return () => {
+      if (durationTimerRef.current) {
+        clearInterval(durationTimerRef.current);
+        durationTimerRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-rice-paper font-serif text-ink-black selection:bg-vermilion selection:text-white relative overflow-hidden">
@@ -99,7 +217,7 @@ const VisionMentor = () => {
               结合计算机视觉技术，实时分析您的非遗技艺动作，提供专业指导与纠错。
             </p>
           </div>
-          
+
           {/* Scenario Switcher */}
           <div className="flex gap-4 mt-6 md:mt-0">
             <button
@@ -124,6 +242,92 @@ const VisionMentor = () => {
             </button>
           </div>
         </div>
+
+        {/* Practice Control Bar */}
+        <div className="mb-8 bg-white/80 backdrop-blur rounded-xl p-4 shadow-lg flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <div className="text-center">
+              <div className="text-xs text-ink-black/50 uppercase tracking-widest">练习时长</div>
+              <div className="text-2xl font-serif text-ink-black">
+                {displayTime}
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-xs text-ink-black/50 uppercase tracking-widest">当前状态</div>
+              <div className={`text-lg font-bold ${
+                isPracticing ? 'text-green-600' : 'text-gray-400'
+              }`}>
+                {isPracticing ? '练习中...' : '未开始'}
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            {!isPracticing ? (
+              <Button onClick={startPractice} className="px-8">
+                开始练习
+              </Button>
+            ) : (
+              <Button onClick={endPractice} variant="outline" className="px-8 border-vermilion text-vermilion hover:bg-vermilion hover:text-white">
+                结束练习
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Session Summary Modal */}
+        {showSessionSummary && sessionStats && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl relative">
+              <button
+                onClick={() => setShowSessionSummary(false)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl"
+              >
+                &times;
+              </button>
+
+              <div className="text-center mb-6">
+                <div className="text-3xl font-calligraphy text-ink-black mb-2">练习完成</div>
+                <p className="text-ink-black/60">本次练习数据已保存</p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="bg-cyan-glaze/10 rounded-xl p-4 text-center">
+                  <div className="text-2xl font-serif text-cyan-glaze">
+                    {Math.floor(sessionStats.duration / 60)}:{String(sessionStats.duration % 60).padStart(2, '0')}
+                  </div>
+                  <div className="text-xs text-ink-black/50 mt-1">练习时长</div>
+                </div>
+                <div className="bg-vermilion/10 rounded-xl p-4 text-center">
+                  <div className="text-2xl font-serif text-vermilion">{sessionStats.accuracy}%</div>
+                  <div className="text-xs text-ink-black/50 mt-1">平均准确率</div>
+                </div>
+                <div className="bg-tea-green/10 rounded-xl p-4 text-center">
+                  <div className="text-2xl font-serif text-tea-green">{sessionStats.score}</div>
+                  <div className="text-xs text-ink-black/50 mt-1">得分</div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    setShowSessionSummary(false);
+                    navigate('/my-practice');
+                  }}
+                >
+                  查看学习进度
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setShowSessionSummary(false)}
+                >
+                  继续练习
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

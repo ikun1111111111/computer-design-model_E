@@ -16,6 +16,7 @@ const Navbar = () => {
         <a href="/craft-library" className="hover:text-vermilion transition-colors">技艺库</a>
         <a href="/master-workshop" className="hover:text-vermilion transition-colors">大师坊</a>
         <a href="/my-practice" className="hover:text-vermilion transition-colors">我的修习</a>
+        <a href="/certificate-preview" className="hover:text-vermilion transition-colors">证书</a>
         <a href="/knowledge-curator" className="hover:text-vermilion transition-colors">知识馆长</a>
       </div>
       <div className="flex items-center gap-4">

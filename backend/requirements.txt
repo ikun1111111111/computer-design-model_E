@@ -13,3 +13,6 @@ langchain-experimental
 httpx
 mysql-connector-python
 sqlalchemy
+pytest
+pytest-asyncio
+pytest-mock
